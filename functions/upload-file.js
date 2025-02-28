@@ -12,22 +12,25 @@ exports.handler = async (event) => {
 
   console.log("收到请求头:", event.headers);
   try {
-    // 解析 multipart/form-data
     const form = new IncomingForm();
     const [fields, files] = await new Promise((resolve, reject) => {
-      form.parse({ headers: event.headers, body: Buffer.from(event.body, "base64") }, (err, fields, files) => {
+      const fakeReq = {
+        headers: event.headers,
+        body: Buffer.from(event.body, "base64"), // Netlify 提供 Base64 编码的 body
+      };
+      form.parse(fakeReq, (err, fields, files) => {
         if (err) reject(err);
         else resolve([fields, files]);
       });
     });
 
-    const file = files.file[0]; // 获取第一个文件
+    const file = files.file[0];
     if (!file) {
       console.log("错误: 缺少文件");
       return { statusCode: 400, body: JSON.stringify({ message: "缺少文件" }) };
     }
 
-    console.log("文件信息:", file.originalFilename, file.mimetype);
+    console.log("文件信息:", file.originalFilename, file.mimetype, file.size);
     const authResponse = await fetch(authUrl, {
       method: "GET",
       headers: {
@@ -52,7 +55,7 @@ exports.handler = async (event) => {
     const { uploadUrl, authorizationToken: uploadAuthToken } = uploadUrlData;
     console.log("获取上传 URL 成功:", uploadUrl);
 
-    const fileBuffer = require("fs").readFileSync(file.filepath); // 读取文件二进制
+    const fileBuffer = require("fs").readFileSync(file.filepath);
     const uploadResponse = await fetch(uploadUrl, {
       method: "POST",
       headers: {
