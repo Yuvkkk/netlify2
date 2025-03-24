@@ -10,7 +10,27 @@
   <button onclick="upload()">上传</button>
   <p id="result"></p>
   <script>
-    const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB 分片大小
+    const CHUNK_SIZE = 2 * 1024 * 1024; // 2MB 分片大小
+    const MAX_RETRIES = 3; // 最大重试次数
+
+    async function uploadChunk(requestBody, retryCount = 0) {
+      try {
+        const response = await fetch("/.netlify/functions/upload-file", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody),
+        });
+        if (!response.ok) throw new Error(await response.text());
+        return await response.json();
+      } catch (error) {
+        if (retryCount < MAX_RETRIES) {
+          console.log(`重试 ${retryCount + 1}/${MAX_RETRIES}...`);
+          await new Promise((resolve) => setTimeout(resolve, 1000)); // 延迟 1 秒
+          return uploadChunk(requestBody, retryCount + 1);
+        }
+        throw error;
+      }
+    }
 
     async function upload() {
       const fileInput = document.getElementById("fileInput");
@@ -25,7 +45,6 @@
       console.log(`总分片数: ${totalChunks}`);
       document.getElementById("result").textContent = "开始上传...";
 
-      // 小文件：直接上传
       if (totalChunks === 1) {
         const reader = new FileReader();
         reader.readAsDataURL(file);
@@ -41,13 +60,7 @@
 
         try {
           console.log("发送小文件请求...");
-          const response = await fetch("/.netlify/functions/upload-file", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(requestBody),
-          });
-          if (!response.ok) throw new Error(await response.text());
-          const data = await response.json();
+          const data = await uploadChunk(requestBody);
           document.getElementById("result").textContent = `文件上传成功: ${data.fileUrl}`;
           console.log("小文件上传成功:", data);
         } catch (error) {
@@ -58,7 +71,6 @@
         return;
       }
 
-      // 大文件：分片上传
       let fileId = null;
       for (let i = 0; i < totalChunks; i++) {
         const start = i * CHUNK_SIZE;
@@ -81,13 +93,7 @@
 
         try {
           console.log(`发送分片 ${i + 1}/${totalChunks}...`);
-          const response = await fetch("/.netlify/functions/upload-file", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(requestBody),
-          });
-          if (!response.ok) throw new Error(await response.text());
-          const data = await response.json();
+          const data = await uploadChunk(requestBody);
           if (i === 0) fileId = data.fileId;
           document.getElementById("result").textContent = `分片 ${i + 1}/${totalChunks} 上传成功`;
           console.log(`分片 ${i + 1} 成功:`, data);
