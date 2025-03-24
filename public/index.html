@@ -2,7 +2,7 @@
 <html lang="zh">
 <head>
   <meta charset="UTF-8">
-  <title>文件上传</title>
+  <title>文件分片上传</title>
 </head>
 <body>
   <h1>上传文件到 Backblaze B2</h1>
@@ -10,6 +10,8 @@
   <button onclick="upload()">上传</button>
   <p id="result"></p>
   <script>
+    const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB 分片大小
+
     async function upload() {
       const fileInput = document.getElementById("fileInput");
       const file = fileInput.files[0];
@@ -18,35 +20,51 @@
         return;
       }
 
-      // 将文件转为 Base64
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = async () => {
-        const base64Data = reader.result.split(",")[1]; // 移除 "data:xxx;base64," 前缀
+      const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+      let fileId = null;
+
+      document.getElementById("result").textContent = "开始上传...";
+
+      for (let i = 0; i < totalChunks; i++) {
+        const start = i * CHUNK_SIZE;
+        const end = Math.min(start + CHUNK_SIZE, file.size);
+        const chunk = file.slice(start, end);
+
+        // 将分片转为 Base64
+        const reader = new FileReader();
+        reader.readAsDataURL(chunk);
+        await new Promise((resolve) => (reader.onload = resolve));
+
+        const base64Data = reader.result.split(",")[1]; // 移除前缀
 
         const requestBody = {
           file: base64Data,
           fileName: file.name,
           mimeType: file.type || "application/octet-stream",
+          partNumber: i + 1,
+          totalParts: totalChunks,
+          fileId: fileId, // 第一次为空，后续使用返回的 fileId
         };
 
         try {
           const response = await fetch("/.netlify/functions/upload-file", {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify(requestBody),
           });
+
+          if (!response.ok) throw new Error(await response.text());
           const data = await response.json();
-          document.getElementById("result").textContent = data.message;
+
+          if (i === 0) fileId = data.fileId; // 第一次上传返回 fileId
+          document.getElementById("result").textContent = `分片 ${i + 1}/${totalChunks} 上传成功`;
         } catch (error) {
-          document.getElementById("result").textContent = "上传失败: " + error.message;
+          document.getElementById("result").textContent = `分片 ${i + 1} 上传失败: ${error.message}`;
+          return;
         }
-      };
-      reader.onerror = () => {
-        document.getElementById("result").textContent = "读取文件失败";
-      };
+      }
+
+      document.getElementById("result").textContent = `文件上传完成: ${file.name}`;
     }
   </script>
 </body>
