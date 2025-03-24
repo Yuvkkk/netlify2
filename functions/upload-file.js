@@ -6,7 +6,6 @@ const applicationKey = "K005GSPBDYHFwmnMHSMPTVgvlxwabLw";
 const authUrl = "https://api.backblazeb2.com/b2api/v2/b2_authorize_account";
 const PART_SIZE = 5 * 1024 * 1024; // 5MB，与前端一致
 
-// 内存中临时存储分片信息（生产环境应使用数据库）
 const uploadSessions = new Map();
 
 exports.handler = async (event) => {
@@ -18,11 +17,11 @@ exports.handler = async (event) => {
     const body = JSON.parse(event.body);
     const { file, fileName, mimeType, partNumber, totalParts, fileId: incomingFileId } = body;
 
-    if (!file || !fileName || !partNumber || !totalParts) {
+    if (!file || !fileName || !totalParts) {
       return { statusCode: 400, body: JSON.stringify({ message: "缺少必要参数" }) };
     }
 
-    console.log(`收到分片: ${partNumber}/${totalParts}, 文件名: ${fileName}`);
+    console.log(`收到请求: ${fileName}, totalParts: ${totalParts}, partNumber: ${partNumber || "N/A"}`);
     const fileBuffer = Buffer.from(file, "base64");
 
     // Step 1: 授权账户
@@ -35,11 +34,46 @@ exports.handler = async (event) => {
     if (!authResponse.ok) throw new Error(JSON.stringify(authData));
     const { authorizationToken, apiUrl } = authData;
 
-    // Step 2: 处理分片上传
+    // 小文件上传
+    if (totalParts === 1) {
+      const uploadUrlResponse = await fetch(`${apiUrl}/b2api/v2/b2_get_upload_url`, {
+        method: "POST",
+        headers: {
+          Authorization: authorizationToken,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ bucketId: "5f4a78ff70c84f6f94510519" }),
+      });
+      const uploadUrlData = await uploadUrlResponse.json();
+      if (!uploadUrlResponse.ok) throw new Error(JSON.stringify(uploadUrlData));
+      const { uploadUrl, authorizationToken: uploadAuthToken } = uploadUrlData;
+
+      const uploadResponse = await fetch(uploadUrl, {
+        method: "POST",
+        headers: {
+          Authorization: uploadAuthToken,
+          "Content-Type": mimeType || "application/octet-stream",
+          "X-Bz-File-Name": encodeURIComponent(fileName),
+          "X-Bz-Content-Sha1": "do_not_verify",
+        },
+        body: fileBuffer,
+      });
+      if (!uploadResponse.ok) throw new Error(await uploadResponse.text());
+
+      console.log("小文件上传成功:", fileName);
+      return {
+        statusCode: 200,
+        body: JSON.stringify({
+          message: "File uploaded successfully",
+          fileUrl: `${apiUrl}/file/my-free-storage/${encodeURIComponent(fileName)}`,
+        }),
+      };
+    }
+
+    // 大文件分片上传
     let fileId = incomingFileId;
     let session = uploadSessions.get(fileName);
 
-    // 第一个分片：启动大文件上传
     if (partNumber === 1) {
       const startLargeFileResponse = await fetch(`${apiUrl}/b2api/v2/b2_start_large_file`, {
         method: "POST",
@@ -65,7 +99,6 @@ exports.handler = async (event) => {
       return { statusCode: 400, body: JSON.stringify({ message: "无效的 fileId 或会话" }) };
     }
 
-    // Step 3: 上传当前分片
     const uploadPartUrlResponse = await fetch(`${apiUrl}/b2api/v2/b2_get_upload_part_url`, {
       method: "POST",
       headers: {
@@ -94,7 +127,6 @@ exports.handler = async (event) => {
     session.parts.push({ partNumber, sha1 });
     console.log(`分片 ${partNumber} 上传成功`);
 
-    // Step 4: 最后一个分片，完成上传
     if (partNumber === totalParts) {
       const finishLargeFileResponse = await fetch(`${apiUrl}/b2api/v2/b2_finish_large_file`, {
         method: "POST",
@@ -107,9 +139,9 @@ exports.handler = async (event) => {
           partSha1Array: session.parts.sort((a, b) => a.partNumber - b.partNumber).map((p) => p.sha1),
         }),
       });
-      if (!finishLargeFileResponse.ok) throw new Error(await finishLargeFileResponse.text());
-      uploadSessions.delete(fileName); // 清理会话
-      console.log("文件上传完成:", fileName);
+      if (!finishLargeFileResponse.ok) throw new Error(await finishLargeFileResponse.text()));
+      uploadSessions.delete(fileName);
+      console.log("大文件上传完成:", fileName);
 
       return {
         statusCode: 200,
@@ -120,7 +152,6 @@ exports.handler = async (event) => {
       };
     }
 
-    // 非最后一个分片，返回 fileId
     return {
       statusCode: 200,
       body: JSON.stringify({
