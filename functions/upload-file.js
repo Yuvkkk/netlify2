@@ -4,11 +4,14 @@ const crypto = require("crypto");
 const accountId = "005fa8f08ff41590000000007";
 const applicationKey = "K005GSPBDYHFwmnMHSMPTVgvlxwabLw";
 const authUrl = "https://api.backblazeb2.com/b2api/v2/b2_authorize_account";
-const PART_SIZE = 5 * 1024 * 1024;
+const PART_SIZE = 2 * 1024 * 1024; // 2MB
 
 const uploadSessions = new Map();
 
-exports.handler = async (event) => {
+exports.handler = async (event, context) => {
+  // 设置超时为 15 秒（需配合 netlify.toml）
+  context.callbackWaitsForEmptyEventLoop = false;
+
   if (event.httpMethod !== "POST") {
     return { statusCode: 405, body: "Method Not Allowed" };
   }
@@ -26,7 +29,6 @@ exports.handler = async (event) => {
     const fileBuffer = Buffer.from(file, "base64");
     console.log(`文件: ${fileName}, 大小: ${fileBuffer.length} 字节, totalParts: ${totalParts}, partNumber: ${partNumber || "N/A"}`);
 
-    // 授权账户
     const authResponse = await fetch(authUrl, {
       headers: {
         Authorization: "Basic " + Buffer.from(`${accountId}:${applicationKey}`).toString("base64"),
@@ -37,7 +39,6 @@ exports.handler = async (event) => {
     const { authorizationToken, apiUrl } = authData;
     console.log("授权成功");
 
-    // 小文件上传
     if (totalParts === 1) {
       const uploadUrlResponse = await fetch(`${apiUrl}/b2api/v2/b2_get_upload_url`, {
         method: "POST",
@@ -73,7 +74,6 @@ exports.handler = async (event) => {
       };
     }
 
-    // 大文件分片上传
     let fileId = incomingFileId;
     let session = uploadSessions.get(fileName);
 
