@@ -4,7 +4,7 @@ const crypto = require("crypto");
 const accountId = "005fa8f08ff41590000000007";
 const applicationKey = "K005GSPBDYHFwmnMHSMPTVgvlxwabLw";
 const authUrl = "https://api.backblazeb2.com/b2api/v2/b2_authorize_account";
-const PART_SIZE = 5 * 1024 * 1024; // 5MB，与前端一致
+const PART_SIZE = 5 * 1024 * 1024;
 
 const uploadSessions = new Map();
 
@@ -13,26 +13,29 @@ exports.handler = async (event) => {
     return { statusCode: 405, body: "Method Not Allowed" };
   }
 
+  console.log("收到请求:", event.body.slice(0, 100));
   try {
+    if (!event.body) throw new Error("请求体为空");
     const body = JSON.parse(event.body);
     const { file, fileName, mimeType, partNumber, totalParts, fileId: incomingFileId } = body;
 
     if (!file || !fileName || !totalParts) {
-      return { statusCode: 400, body: JSON.stringify({ message: "缺少必要参数" }) };
+      throw new Error("缺少必要参数: file, fileName 或 totalParts");
     }
 
-    console.log(`收到请求: ${fileName}, totalParts: ${totalParts}, partNumber: ${partNumber || "N/A"}`);
     const fileBuffer = Buffer.from(file, "base64");
+    console.log(`文件: ${fileName}, 大小: ${fileBuffer.length} 字节, totalParts: ${totalParts}, partNumber: ${partNumber || "N/A"}`);
 
-    // Step 1: 授权账户
+    // 授权账户
     const authResponse = await fetch(authUrl, {
       headers: {
         Authorization: "Basic " + Buffer.from(`${accountId}:${applicationKey}`).toString("base64"),
       },
     });
     const authData = await authResponse.json();
-    if (!authResponse.ok) throw new Error(JSON.stringify(authData));
+    if (!authResponse.ok) throw new Error(`授权失败: ${JSON.stringify(authData)}`);
     const { authorizationToken, apiUrl } = authData;
+    console.log("授权成功");
 
     // 小文件上传
     if (totalParts === 1) {
@@ -45,7 +48,7 @@ exports.handler = async (event) => {
         body: JSON.stringify({ bucketId: "5f4a78ff70c84f6f94510519" }),
       });
       const uploadUrlData = await uploadUrlResponse.json();
-      if (!uploadUrlResponse.ok) throw new Error(JSON.stringify(uploadUrlData));
+      if (!uploadUrlResponse.ok) throw new Error(`获取上传 URL 失败: ${JSON.stringify(uploadUrlData)}`);
       const { uploadUrl, authorizationToken: uploadAuthToken } = uploadUrlData;
 
       const uploadResponse = await fetch(uploadUrl, {
@@ -58,7 +61,7 @@ exports.handler = async (event) => {
         },
         body: fileBuffer,
       });
-      if (!uploadResponse.ok) throw new Error(await uploadResponse.text());
+      if (!uploadResponse.ok) throw new Error(`上传失败: ${await uploadResponse.text()}`);
 
       console.log("小文件上传成功:", fileName);
       return {
@@ -88,7 +91,7 @@ exports.handler = async (event) => {
         }),
       });
       const startLargeFileData = await startLargeFileResponse.json();
-      if (!startLargeFileResponse.ok) throw new Error(JSON.stringify(startLargeFileData));
+      if (!startLargeFileResponse.ok) throw new Error(`启动大文件失败: ${JSON.stringify(startLargeFileData)}`);
       fileId = startLargeFileData.fileId;
       session = { fileId, parts: [] };
       uploadSessions.set(fileName, session);
@@ -96,7 +99,7 @@ exports.handler = async (event) => {
     }
 
     if (!fileId || !session) {
-      return { statusCode: 400, body: JSON.stringify({ message: "无效的 fileId 或会话" }) };
+      throw new Error("无效的 fileId 或会话");
     }
 
     const uploadPartUrlResponse = await fetch(`${apiUrl}/b2api/v2/b2_get_upload_part_url`, {
@@ -108,7 +111,7 @@ exports.handler = async (event) => {
       body: JSON.stringify({ fileId }),
     });
     const uploadPartUrlData = await uploadPartUrlResponse.json();
-    if (!uploadPartUrlResponse.ok) throw new Error(JSON.stringify(uploadPartUrlData));
+    if (!uploadPartUrlResponse.ok) throw new Error(`获取分片 URL 失败: ${JSON.stringify(uploadPartUrlData)}`);
     const { uploadUrl, authorizationToken: partAuthToken } = uploadPartUrlData;
 
     const sha1 = crypto.createHash("sha1").update(fileBuffer).digest("hex");
@@ -123,7 +126,7 @@ exports.handler = async (event) => {
       },
       body: fileBuffer,
     });
-    if (!uploadPartResponse.ok) throw new Error(await uploadPartResponse.text());
+    if (!uploadPartResponse.ok) throw new Error(`分片上传失败: ${await uploadPartResponse.text()}`);
     session.parts.push({ partNumber, sha1 });
     console.log(`分片 ${partNumber} 上传成功`);
 
@@ -139,7 +142,7 @@ exports.handler = async (event) => {
           partSha1Array: session.parts.sort((a, b) => a.partNumber - b.partNumber).map((p) => p.sha1),
         }),
       });
-      if (!finishLargeFileResponse.ok) throw new Error(await finishLargeFileResponse.text()));
+      if (!finishLargeFileResponse.ok) throw new Error(`完成大文件失败: ${await finishLargeFileResponse.text()}`);
       uploadSessions.delete(fileName);
       console.log("大文件上传完成:", fileName);
 
