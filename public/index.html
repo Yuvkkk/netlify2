@@ -11,22 +11,42 @@
   <p id="result"></p>
   <script>
     async function upload() {
-      const file = document.getElementById("fileInput").files[0];
-      if (!file) return;
-
-      const formData = new FormData();
-      formData.append("file", file); // 直接添加文件
-
-      try {
-        const response = await fetch("/.netlify/functions/upload-file", {
-          method: "POST",
-          body: formData, // 发送 FormData，不设 Content-Type（浏览器自动处理）
-        });
-        const data = await response.json();
-        document.getElementById("result").textContent = data.message;
-      } catch (error) {
-        document.getElementById("result").textContent = "上传失败: " + error.message;
+      const fileInput = document.getElementById("fileInput");
+      const file = fileInput.files[0];
+      if (!file) {
+        document.getElementById("result").textContent = "请选择文件";
+        return;
       }
+
+      // 将文件转为 Base64
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = async () => {
+        const base64Data = reader.result.split(",")[1]; // 移除 "data:xxx;base64," 前缀
+
+        const requestBody = {
+          file: base64Data,
+          fileName: file.name,
+          mimeType: file.type || "application/octet-stream",
+        };
+
+        try {
+          const response = await fetch("/.netlify/functions/upload-file", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(requestBody),
+          });
+          const data = await response.json();
+          document.getElementById("result").textContent = data.message;
+        } catch (error) {
+          document.getElementById("result").textContent = "上传失败: " + error.message;
+        }
+      };
+      reader.onerror = () => {
+        document.getElementById("result").textContent = "读取文件失败";
+      };
     }
   </script>
 </body>
