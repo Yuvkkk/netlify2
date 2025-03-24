@@ -20,50 +20,83 @@
         return;
       }
 
+      console.log(`文件大小: ${file.size} 字节`);
       const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-      let fileId = null;
-
+      console.log(`总分片数: ${totalChunks}`);
       document.getElementById("result").textContent = "开始上传...";
 
+      // 小文件：直接上传
+      if (totalChunks === 1) {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        await new Promise((resolve) => (reader.onload = resolve));
+
+        const base64Data = reader.result.split(",")[1];
+        const requestBody = {
+          file: base64Data,
+          fileName: file.name,
+          mimeType: file.type || "application/octet-stream",
+          totalParts: 1,
+        };
+
+        try {
+          console.log("发送小文件请求...");
+          const response = await fetch("/.netlify/functions/upload-file", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(requestBody),
+          });
+          if (!response.ok) throw new Error(await response.text());
+          const data = await response.json();
+          document.getElementById("result").textContent = `文件上传成功: ${data.fileUrl}`;
+          console.log("小文件上传成功:", data);
+        } catch (error) {
+          document.getElementById("result").textContent = `上传失败: ${error.message}`;
+          console.error("小文件上传错误:", error.message);
+          return;
+        }
+        return;
+      }
+
+      // 大文件：分片上传
+      let fileId = null;
       for (let i = 0; i < totalChunks; i++) {
         const start = i * CHUNK_SIZE;
         const end = Math.min(start + CHUNK_SIZE, file.size);
         const chunk = file.slice(start, end);
 
-        // 将分片转为 Base64
         const reader = new FileReader();
         reader.readAsDataURL(chunk);
         await new Promise((resolve) => (reader.onload = resolve));
 
-        const base64Data = reader.result.split(",")[1]; // 移除前缀
-
+        const base64Data = reader.result.split(",")[1];
         const requestBody = {
           file: base64Data,
           fileName: file.name,
           mimeType: file.type || "application/octet-stream",
           partNumber: i + 1,
           totalParts: totalChunks,
-          fileId: fileId, // 第一次为空，后续使用返回的 fileId
+          fileId: fileId,
         };
 
         try {
+          console.log(`发送分片 ${i + 1}/${totalChunks}...`);
           const response = await fetch("/.netlify/functions/upload-file", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(requestBody),
           });
-
           if (!response.ok) throw new Error(await response.text());
           const data = await response.json();
-
-          if (i === 0) fileId = data.fileId; // 第一次上传返回 fileId
+          if (i === 0) fileId = data.fileId;
           document.getElementById("result").textContent = `分片 ${i + 1}/${totalChunks} 上传成功`;
+          console.log(`分片 ${i + 1} 成功:`, data);
         } catch (error) {
           document.getElementById("result").textContent = `分片 ${i + 1} 上传失败: ${error.message}`;
+          console.error(`分片 ${i + 1} 错误:`, error.message);
           return;
         }
       }
-
       document.getElementById("result").textContent = `文件上传完成: ${file.name}`;
     }
   </script>
