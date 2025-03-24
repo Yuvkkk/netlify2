@@ -10,8 +10,8 @@
   <button onclick="upload()">上传</button>
   <p id="result"></p>
   <script>
-    const CHUNK_SIZE = 2 * 1024 * 1024; // 2MB 分片大小
-    const MAX_RETRIES = 3; // 最大重试次数
+    const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB 分片大小，符合 B2 要求
+    const MAX_RETRIES = 3;
 
     async function uploadChunk(requestBody, retryCount = 0) {
       try {
@@ -25,7 +25,7 @@
       } catch (error) {
         if (retryCount < MAX_RETRIES) {
           console.log(`重试 ${retryCount + 1}/${MAX_RETRIES}...`);
-          await new Promise((resolve) => setTimeout(resolve, 1000)); // 延迟 1 秒
+          await new Promise((resolve) => setTimeout(resolve, 1000));
           return uploadChunk(requestBody, retryCount + 1);
         }
         throw error;
