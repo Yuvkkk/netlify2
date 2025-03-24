@@ -10,7 +10,7 @@
   <button onclick="upload()">上传</button>
   <p id="result"></p>
   <script>
-    const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB 分片大小，符合 B2 要求
+    const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB 分片大小
     const MAX_RETRIES = 3;
 
     async function uploadChunk(requestBody, retryCount = 0) {
